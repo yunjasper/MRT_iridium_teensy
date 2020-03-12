@@ -4,18 +4,18 @@ Contains the code for using Teensy 3.5 with RockBLOCK MK2/Iridium and Adafruit U
 
 Raymond Yang wrote most of the code, link: https://github.com/yanghaoqin/Iridium-RockBLOCK
 
-# Hardware
+## Hardware
 - Teensy 3.5
 - RockBLOCK MK2
 - Adafruit Ultimate GPS (V3)
 
-# Dependencies
+## Dependencies
 
 The code requires the following libraries:
 - *_IridiumSBD_* Arduino Library
 - *_TinyGPS++_* Arduino Library
 
-#Setup
+## Setup
 
 The code uses the Serial1 for the GPS and Serial3 for the RockBLOCK on the Teensy 3.5 and USB Serial for displaying information. Connect:
 - GPS RX/TX to Teensy pins 0/1
