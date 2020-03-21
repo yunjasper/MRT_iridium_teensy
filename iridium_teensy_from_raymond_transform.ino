@@ -1,7 +1,8 @@
-// Control of RockBLOCK to access the Iridium SatComm Network with Teensy
+// Control of RockBLOCK to access the Iridium SatComm Network with Teensy 3.5
+// Original code written for Arduino UNO
 // Author: Raymond Yang
 // Editor: Jasper Yun
-// Date: 20200311
+// Date: 20200316
 // Version 1.0
 
 /*
@@ -13,6 +14,7 @@
    5. signal
    6. testgps
    7. exit
+   8. cmd (see commands)
    
    Error Codes:
    ISBD_SUCCESS 0
@@ -32,9 +34,9 @@
 */
 
 //#include <SoftwareSerial.h>
-#include <IridiumSBD.h>
-#include <time.h>
-#include <TinyGPS++.h>  // for parsing GPS data
+#include "IridiumSBD.h"
+#include "time.h"
+#include "TinyGPS++.h"  // for parsing GPS data
 
 #define DIAGNOSTICS true
 #define SLEEP_PIN 4
@@ -48,37 +50,45 @@
 #define GET_SIGNAL_QUALITY -5
 #define SEND_GPS -6
 #define TEST_GPS -7
+#define SHOW_GPS -8
+
+//SoftwareSerial rbserial(10, 11); // 10 is RX and 11 is TX
+//SoftwareSerial gpsserial(5, 6); // 5 is RX and 6 is TX
 
 // using Teensy 3.5, use hardware serial instead of SoftwareSerial
 #define gpsserial Serial1 // pins RX/TX = 0/1
 #define rbserial Serial3  // pins RX/TX = 7/8
 
-#define GPS 2 // used for the clearSerial function
+#define GPSs 1 // used for the clearSerial function
 #define RB 3
-
-//SoftwareSerial rbserial(10, 11); // 10 is RX and 11 is TX
-//SoftwareSerial gpsserial(5, 6); // 5 is RX and 6 is TX
 
 IridiumSBD modem(rbserial, SLEEP_PIN); // declare IridiumSBD object
 TinyGPSPlus gps; // gps object
 
 static int fsmstate = 0; // user command
 
+// function prototype
+void clearSerial(int serialPort);
+void displayInfo();
+
+
 void setup() {
-  Serial.begin(115200); // data rate for desktop - arduino
+  Serial.begin(115200); // data rate for desktop - teensy
   while (!Serial) {} // wait for serial to connect
   Serial.println("Desktop - Arduino Connection Established.");
 
   rbserial.begin(19200); // data rate for arduino - iridium serial port
   Serial.println("Arduino - Iridium Connection Established.");
 
-  gpsserial.begin(9600); // data rate for arduino - gps serial port
+  gpsserial.begin(38400); // data rate for arduino - gps serial port (neo-m9n uses 38400)
   Serial.println("Arduino - GPS Connection Established.");
 
   modem.setPowerProfile(IridiumSBD::USB_POWER_PROFILE); // low power profile
 
   Serial.println("Starting modem...");
+  
   //rbserial.listen(); // listen to RockBLOCK
+  
   int status = modem.begin(); // wake modem
   if (status != ISBD_SUCCESS) {
     Serial.print("Begin failed: error ");
@@ -134,14 +144,21 @@ void loop() {
         fsmstate = SEND_GPS;
       } else if (strcmp(msg, "testgps") == 0) {
         fsmstate = TEST_GPS;
-      } else if (strcmp(msg, "cmd") == 0){
-        Serial.println("sleep -- systime -- wake -- exit -- signal -- sendgps -- testgps");
+      } else if (strcmp(msg, "cmd") == 0) {
+        Serial.println("sleep | systime | wake | exit | signal | sendgps | testgps | showgps");
+        fsmstate = ENTER_CMD;
+      } else if (strcmp(msg, "showgps") == 0) {
+        fsmstate = SHOW_GPS;
+      } else if (strcmp(msg, "clrgps") == 0) {
+        clearSerial(GPSs);
+        fsmstate = ENTER_CMD;
       } else {
         fsmstate = ENTER_CMD;
         Serial.println("Command not recognized.");
       }
     }
   }
+  
 
   if (fsmstate == WAKE_MODEM) {
     Serial.println("Starting modem...");
@@ -155,6 +172,8 @@ void loop() {
     } else {
       Serial.println("Modem Ready.\n");
     }
+
+    
   } else if (fsmstate == SLEEP_MODEM) {
     Serial.println("Putting modem to sleep...");
     int status = modem.sleep();
@@ -164,6 +183,8 @@ void loop() {
     } else {
       Serial.println("Modem is asleep.\n");
     }
+
+    
   } else if (fsmstate == GET_SYSTEM_TIME) {
     boolean network = false;
     int tries = 0;
@@ -187,6 +208,8 @@ void loop() {
         Serial.println();
       }
     }
+
+    
   } else if (fsmstate == GET_SIGNAL_QUALITY) {
     // returns a number between 0 and 5
     // 2 or better is preferred
@@ -200,15 +223,18 @@ void loop() {
       Serial.println(signalQuality);
       Serial.println();
     }
+
+    
   } else if (fsmstate == EXIT) {
     Serial.println("Connection Terminated.\n");
     delay(500UL);
     exit(0);
-  } else if(fsmstate == TEST_GPS){
-    //gpsserial.listen(); // listen to GPS
+
     
-    // since we are not using SoftwareSerial listen(), we clear the input stream buffer
-    clearSerial(GPS);
+  } else if(fsmstate == TEST_GPS) {
+    //gpsserial.listen(); // listen to GPS
+    clearSerial(GPSs);
+    
     // listen for gps traffic
     unsigned long loopStartTime = millis(); // start time
     Serial.println("Beginning to listen for GPS traffic...");
@@ -247,12 +273,53 @@ void loop() {
     Serial.println(outBuffer);
 
     //rbserial.listen();
-    // similarly, clear the rbserial receive buffer
     clearSerial(RB);
+
+    
+  } else if (fsmstate == SHOW_GPS) {
+    //clearSerial(GPSs);
+
+    while (Serial.available() == 0) {
+      while (gpsserial.available() > 0) {
+        if (gps.encode(gpsserial.read())) {
+          
+          /*
+          char outBuffer[60];
+          sprintf(outBuffer, "%d%02d%02d%02d%02d%02d,%s%u.%09lu,%s%u.%09lu,%lu,%ld",
+                  gps.date.year(),
+                  gps.date.month(),
+                  gps.date.day(),
+                  gps.time.hour(),
+                  gps.time.minute(),
+                  gps.time.second(),
+                  gps.location.rawLat().negative ? "-" : "",
+                  gps.location.rawLat().deg,
+                  gps.location.rawLat().billionths,
+                  gps.location.rawLng().negative ? "-" : "",
+                  gps.location.rawLng().deg,
+                  gps.location.rawLng().billionths,
+                  gps.speed.value() / 100,
+                  gps.course.value() / 100
+                 );
+      
+          Serial.print("GPS Data: ");
+          Serial.println(outBuffer);
+
+          */
+
+          displayInfo();
+        }
+      }
+      
+      delay(100UL);
+      //rbserial.listen();
+      clearSerial(RB);
+    }
     
   } else if (fsmstate == SEND_GPS) {
     //gpsserial.listen(); // listen to GPS
-    clearSerial(GPS);
+    clearSerial(GPSs);
+    
     // listen for gps traffic
     unsigned long loopStartTime = millis(); // start time
     Serial.println("Beginning to listen for GPS traffic...");
@@ -293,7 +360,6 @@ void loop() {
 
     //rbserial.listen(); // listen to RockBLOCK
     clearSerial(RB);
-    
     int status = modem.sendSBDText(outBuffer);
     if (status != ISBD_SUCCESS) {
       Serial.print("Transmission failed with error code ");
@@ -302,6 +368,16 @@ void loop() {
     } else {
       Serial.println("Connected to Network.\n");
     }
+    
+    //int status = modem.sendSBDText("send");
+    if (status != ISBD_SUCCESS) {
+      Serial.print("Transmission failed with error code ");
+      Serial.println(status);
+      Serial.println();
+    } else {
+      Serial.println("Connected to Network.\n");
+    }
+
   } else {
     // not going to happen
   }
@@ -368,4 +444,61 @@ void clearSerial(int serialPort) {
     return;
   }
   else return;
+}
+
+
+void displayInfo()
+{
+  Serial.print(F("Location: ")); 
+  //if (gps.location.isValid())
+  {
+    Serial.print(gps.location.lat(), 6);
+    Serial.print(F(","));
+    Serial.print(gps.location.lng(), 6);
+  }
+
+  /*
+  else
+  {
+    Serial.print(F("INVALID"));
+  }
+
+  */
+  
+
+  Serial.print(F("  Date/Time: "));
+  if (gps.date.isValid())
+  {
+    Serial.print(gps.date.month());
+    Serial.print(F("/"));
+    Serial.print(gps.date.day());
+    Serial.print(F("/"));
+    Serial.print(gps.date.year());
+  }
+  else
+  {
+    Serial.print(F("INVALID"));
+  }
+
+  Serial.print(F(" "));
+  if (gps.time.isValid())
+  {
+    if (gps.time.hour() < 10) Serial.print(F("0"));
+    Serial.print(gps.time.hour());
+    Serial.print(F(":"));
+    if (gps.time.minute() < 10) Serial.print(F("0"));
+    Serial.print(gps.time.minute());
+    Serial.print(F(":"));
+    if (gps.time.second() < 10) Serial.print(F("0"));
+    Serial.print(gps.time.second());
+    Serial.print(F("."));
+    if (gps.time.centisecond() < 10) Serial.print(F("0"));
+    Serial.print(gps.time.centisecond());
+  }
+  else
+  {
+    Serial.print(F("INVALID"));
+  }
+
+  Serial.println();
 }
