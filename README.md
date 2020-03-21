@@ -7,7 +7,7 @@ Raymond Yang wrote most of the code, link: https://github.com/yanghaoqin/Iridium
 ## Hardware
 - Teensy 3.5
 - RockBLOCK MK2
-- Adafruit Ultimate GPS (V3)
+- uBlox NEO-M9N GPS
 
 ## Dependencies
 
